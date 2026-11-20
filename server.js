@@ -1,96 +1,67 @@
 const express = require('express');
-const fs = require('fs');
 const path = require('path');
+const { initDB } = require('./db/init');
+const taskModel = require('./db/taskModel');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DATA_FILE = path.join(__dirname, 'data.json');
-const statuses = ['todo','in-progress','done'];
-const priorities = ['low','medium','high'];
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-function readTasks() {
-  try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-  } catch {
-    return [];
-  }
-}
-
-function writeTasks(tasks) {
-  fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
-  fs.writeFileSync(DATA_FILE, JSON.stringify(tasks, null, 2));
-}
-
-app.get('/api/tasks', (req, res) => {
-  let tasks = readTasks();
-  const { assignee } = req.query;
-  if (assignee) {
-    tasks = tasks.filter(
-      (t) => t.assignee.toLowerCase() === assignee.toLowerCase()
-    );
-  }
+app.get('/api/tasks', async (req, res) => {
+  const tasks = await taskModel.getAllTasks(req.query.assignee);
   res.json(tasks);
 });
 
-app.post('/api/tasks', (req, res) => {
-  const { title, assignee, priority } = req.body;
-
-  if (!title || !title.trim()) {
-    return res.status(400).json({ error: 'Title is required' });
-  }
-  if (priority && !priorities.includes(priority)) {
-    return res.status(400).json({ error: 'Invalid priority' });
-  }
-
-  const task = {
-    id: Date.now(),
-    title: title.trim(),
-    assignee: (assignee || 'Unassigned').trim(),
-    priority: priority || 'medium',
-    status: 'todo',
-  };
-
-  const tasks = readTasks();
-  tasks.push(task);
-  writeTasks(tasks);
-  res.status(201).json(task);
+app.get('/api/tasks/grouped', async (req, res) => {
+  res.json(await taskModel.getAllTasksGrouped());
 });
 
-app.patch('/api/tasks/:id', (req, res) => {
-  const { status, priority } = req.body;
-
-  if (status && !statuses.includes(status)) {
-    return res.status(400).json({ error: 'Invalid status' });
+app.post('/api/tasks', async (req, res) => {
+  try {
+    const { title, description, assignee, priority, status } = req.body ?? {};
+    const task = await taskModel.createTask({ title, description, assignee, priority, status });
+    res.status(201).json(task);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
-  if (priority && !priorities.includes(priority)) {
-    return res.status(400).json({ error: 'Invalid priority' });
-  }
-
-  const tasks = readTasks();
-  const task = tasks.find((t) => t.id === Number(req.params.id));
-  if (!task) return res.status(404).json({ error: 'Task not found' });
-
-  if (status) task.status = status;
-  if (priority) task.priority = priority;
-
-  writeTasks(tasks);
-  res.json(task);
 });
 
-app.delete('/api/tasks/completed', (req, res) => {
-  const tasks = readTasks();
-  const remaining = tasks.filter((t) => t.status !== 'done');
-  writeTasks(remaining);
-  res.json({ removed: tasks.length - remaining.length });
+app.patch('/api/tasks/:id', async (req, res) => {
+  try {
+    const { title, description, assignee, priority, status, position } = req.body ?? {};
+    const task = await taskModel.updateTask(req.params.id, {
+      title, description, assignee, priority, status, position,
+    });
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    res.json(task);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
-app.delete('/api/tasks/:id', (req, res) => {
-  const tasks = readTasks().filter((t) => t.id !== Number(req.params.id));
-  writeTasks(tasks);
+app.delete('/api/tasks/completed', async (req, res) => {
+  const removed = await taskModel.deleteCompletedTasks();
+  res.json({ removed });
+});
+
+app.delete('/api/tasks/:id', async (req, res) => {
+  const deleted = await taskModel.deleteTask(req.params.id);
+  if (!deleted) return res.status(404).json({ error: 'Task not found' });
   res.status(204).end();
 });
 
-app.listen(PORT, () => {
-  console.log(`Task board running at http://localhost:${PORT}`);
-});
+async function start() {
+  try {
+    await initDB();
+    app.listen(PORT, () => {
+      console.log(`Task board running at http://localhost:${PORT}`);
+    });
+  } catch (err) {
+    console.error('Failed to start:', err.message);
+    process.exit(1);
+  }
+}
+
+start();
