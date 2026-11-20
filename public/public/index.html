@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Team Task Board</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Team Task Board</h1>
+    </header>
+
+    <main>
+      <!-- Form to add a new task -->
+      <section aria-label="Add Task">
+        <form id="task-form">
+          <label for="task-title">Task</label>
+          <input
+            type="text"
+            id="task-title"
+            name="title"
+            placeholder="Enter a task..."
+            required
+          />
+
+          <label for="task-assignee">Assignee</label>
+          <input
+            type="text"
+            id="task-assignee"
+            name="assignee"
+            placeholder="e.g. Dan"
+          />
+
+          <label for="task-priority">Priority</label>
+          <select id="task-priority" name="priority">
+            <option value="low">Low</option>
+            <option value="medium" selected>Medium</option>
+            <option value="high">High</option>
+          </select>
+
+          <button type="submit">Add Task</button>
+        </form>
+      </section>
+
+      <!-- Action bar -->
+      <section aria-label="Board Actions">
+        <button type="button" id="clear-done-btn">Clear done</button>
+      </section>
+
+      <!-- Three Kanban columns -->
+      <section aria-label="Task Columns">
+        <div class="column" data-status="todo">
+          <h2>To Do</h2>
+          <div class="task-list" id="todo-tasks"></div>
+        </div>
+
+        <div class="column" data-status="doing">
+          <h2>In Progress</h2>
+          <div class="task-list" id="doing-tasks"></div>
+        </div>
+
+        <div class="column" data-status="done">
+          <h2>Done</h2>
+          <div class="task-list" id="done-tasks"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Team Task Board &bull; HTML Structure</p>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>
