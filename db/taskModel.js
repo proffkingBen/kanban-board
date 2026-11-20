@@ -2,6 +2,11 @@ const db = require('./connection');
 
 const VALID_STATUSES = new Set(['todo', 'in-progress', 'done']);
 const VALID_PRIORITIES = new Set(['low', 'medium', 'high']);
+
+function ensure(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
 const updateStatements = new Map();
 let statements;
 let updateTaskTransaction;
@@ -16,7 +21,7 @@ function prepareStatements() {
     ),
     groupedTasks: db.prepare(
       'SELECT id, title, assignee, priority, status FROM tasks ' +
-      'ORDER BY position ASC, created_at DESC'
+      'ORDER BY position ASC, id ASC'
     ),
     tasksByAssignee: db.prepare(
       'SELECT id, title, assignee, priority, status FROM tasks ' +
@@ -139,18 +144,10 @@ async function createTask({
   priority = 'medium',
   status = 'todo'
 }) {
-  if (typeof title !== 'string' || !title.trim()) {
-    throw new Error('Title is required');
-  }
-  if (typeof assignee !== 'string') {
-    throw new Error('Assignee must be a string');
-  }
-  if (!VALID_PRIORITIES.has(priority)) {
-    throw new Error('Invalid priority');
-  }
-  if (!VALID_STATUSES.has(status)) {
-    throw new Error('Invalid status');
-  }
+  ensure(typeof title === 'string' && title.trim(), 'Title is required');
+  ensure(typeof assignee === 'string', 'Assignee must be a string');
+  ensure(VALID_PRIORITIES.has(priority), 'Invalid priority');
+  ensure(VALID_STATUSES.has(status), 'Invalid status');
 
   prepareStatements();
   const normalizedAssignee = assignee.trim() || 'Unassigned';
@@ -166,32 +163,20 @@ async function createTask({
 
 async function updateTask(id, updates = {}) {
   const numericId = Number(id);
-  if (!Number.isInteger(numericId)) {
-    throw new Error('Invalid task id');
-  }
-  if (updates.status !== undefined && !VALID_STATUSES.has(updates.status)) {
-    throw new Error('Invalid status');
-  }
-  if (updates.priority !== undefined && !VALID_PRIORITIES.has(updates.priority)) {
-    throw new Error('Invalid priority');
-  }
-  if (updates.position !== undefined && (!Number.isInteger(updates.position) || updates.position < 0)) {
-    throw new Error('Position must be a non-negative integer');
-  }
-  if (updates.title !== undefined && (typeof updates.title !== 'string' || !updates.title.trim())) {
-    throw new Error('Title must not be empty');
-  }
-  if (updates.assignee !== undefined &&
-      (typeof updates.assignee !== 'string' || !updates.assignee.trim())) {
-    throw new Error('Assignee must not be empty');
-  }
+  ensure(Number.isInteger(numericId) && numericId > 0, 'Invalid task id');
+  ensure(updates && typeof updates === 'object' && !Array.isArray(updates), 'Updates must be an object');
+  ensure(updates.status === undefined || VALID_STATUSES.has(updates.status), 'Invalid status');
+  ensure(updates.priority === undefined || VALID_PRIORITIES.has(updates.priority), 'Invalid priority');
+  ensure(updates.position === undefined || (Number.isInteger(updates.position) && updates.position >= 0),
+    'Position must be a non-negative integer');
+  ensure(updates.title === undefined || (typeof updates.title === 'string' && updates.title.trim()),
+    'Title must not be empty');
+  ensure(updates.assignee === undefined ||
+    (typeof updates.assignee === 'string' && updates.assignee.trim()), 'Assignee must not be empty');
 
   const normalizedUpdates = { ...updates };
-  if (normalizedUpdates.title !== undefined) {
-    normalizedUpdates.title = normalizedUpdates.title.trim();
-  }
-  if (normalizedUpdates.assignee !== undefined) {
-    normalizedUpdates.assignee = normalizedUpdates.assignee.trim();
+  for (const field of ['title', 'assignee']) {
+    if (normalizedUpdates[field] !== undefined) normalizedUpdates[field] = normalizedUpdates[field].trim();
   }
 
   prepareStatements();
@@ -200,7 +185,7 @@ async function updateTask(id, updates = {}) {
 
 async function deleteTask(id) {
   const numericId = Number(id);
-  if (!Number.isInteger(numericId)) return false;
+  if (!Number.isInteger(numericId) || numericId < 1) return false;
   prepareStatements();
   return deleteTaskTransaction(numericId);
 }
