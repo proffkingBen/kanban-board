@@ -40,6 +40,7 @@ Open **http://localhost:3000** in your browser.
 ├── .gitignore         Files Git must not track
 ├── README.md          This file
 ├── data/              tasks.json is created here automatically (ignored by Git)
+├── db/                Optional, standalone SQLite data-access module
 └── public/
     ├── index.html     Page structure (markup)
     ├── style.css      Look and layout (styling)
@@ -58,6 +59,20 @@ Express server (server.js)  <-->  data/tasks.json
 ```
 
 The browser loads the page from the `public` folder. `app.js` calls the API with `fetch`, and `server.js` reads and writes `data/tasks.json`.
+
+The `db/` directory is a separate, optional SQLite layer. It is not currently connected to `server.js`; the app continues to use its JSON-file storage unless the backend is explicitly wired to the database module. The module uses `better-sqlite3` and creates `data/tasks.db` when its connection is opened.
+
+Its CommonJS entry points can be used from backend code:
+
+```js
+const { initDB } = require('./db/init');
+const tasks = require('./db/taskModel');
+
+await initDB();
+const groupedTasks = await tasks.getAllTasksGrouped();
+```
+
+`initDB()` creates the `tasks` table if needed. The task model exposes grouped listing, create, update/reorder, single-task deletion, and deletion of completed tasks. Keeping this layer separate from Express makes its schema and data-access logic independently reusable and testable.
 
 A task looks like this:
 
