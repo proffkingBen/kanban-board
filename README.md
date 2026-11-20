@@ -39,7 +39,7 @@ Open **http://localhost:3000** in your browser.
 ├── package.json       Project info and the npm start script
 ├── .gitignore         Files Git must not track
 ├── README.md          This file
-├── data/              tasks.json is created here automatically (ignored by Git)
+├── data.json          JSON task storage used by server.js
 ├── db/                Optional, standalone SQLite data-access module
 └── public/
     ├── index.html     Page structure (markup)
@@ -55,10 +55,10 @@ Open **http://localhost:3000** in your browser.
 Browser (index.html + style.css + app.js)
         |  fetch() requests
         v
-Express server (server.js)  <-->  data/tasks.json
+Express server (server.js)  <-->  data.json
 ```
 
-The browser loads the page from the `public` folder. `app.js` calls the API with `fetch`, and `server.js` reads and writes `data/tasks.json`.
+The browser loads the page from the `public` folder. `app.js` calls the API with `fetch`, and `server.js` reads and writes `data.json`.
 
 The `db/` directory is a separate, optional SQLite layer. It is not currently connected to `server.js`; the app continues to use its JSON-file storage unless the backend is explicitly wired to the database module. The module uses `better-sqlite3` and creates `data/tasks.db` when its connection is opened.
 
@@ -69,7 +69,7 @@ const { initDB } = require('./db/init');
 const tasks = require('./db/taskModel');
 
 await initDB();
-const groupedTasks = await tasks.getAllTasksGrouped();
+const taskList = await tasks.getAllTasks('Dan');
 ```
 
 `initDB()` creates the `tasks` table if needed. The task model exposes grouped listing, create, update/reorder, single-task deletion, and deletion of completed tasks. Keeping this layer separate from Express makes its schema and data-access logic independently reusable and testable.
@@ -86,8 +86,9 @@ A task looks like this:
 }
 ```
 
-- `status` is one of: `todo`, `doing`, `done`
+- `status` is one of: `todo`, `in-progress`, `done`
 - `priority` is one of: `low`, `medium`, `high`
+- New tasks default to `Unassigned` and `medium` priority.
 
 ---
 
@@ -99,10 +100,10 @@ A task looks like this:
 | GET | `/api/tasks?assignee=Dan` | List one person's tasks | none |
 | POST | `/api/tasks` | Create a task | `title` (required), `assignee`, `priority` |
 | PATCH | `/api/tasks/:id` | Change status or priority | `status` and/or `priority` |
-| DELETE | `/api/tasks/completed` | Remove all tasks in Done | none |
+| DELETE | `/api/tasks/completed` | Remove all tasks in Done; returns `{ "removed": count }` | none |
 | DELETE | `/api/tasks/:id` | Remove one task | none |
 
-Common responses: `200` OK, `201` created, `204` deleted, `400` bad input, `404` task not found.
+Common responses: `200` OK (including clear-completed), `201` created, `204` deleted, `400` bad input, `404` task not found.
 
 Quick test from PowerShell:
 
