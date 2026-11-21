@@ -1,9 +1,44 @@
-<<<<<<< HEAD:public/public/app.js
 const taskColumns = [
-  { status: 'todo', elementId: 'todo-tasks' },
-  { status: 'in-progress', elementId: 'doing-tasks' },
-  { status: 'done', elementId: 'done-tasks' },
+  { status: 'todo', elementId: 'todo-tasks', label: 'To Do' },
+  { status: 'in-progress', elementId: 'doing-tasks', label: 'In Progress' },
+  { status: 'done', elementId: 'done-tasks', label: 'Done' },
 ];
+
+const filterInput = document.getElementById('filter-assignee');
+const movingTaskIds = new Set();
+let isDraggingTask = false;
+
+async function api(url, options = {}) {
+  const response = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+  const data = response.status === 204 ? null : await response.json();
+  if (!response.ok) {
+    throw new Error(data?.error || `Request failed with status ${response.status}`);
+  }
+  return data;
+}
+
+function updateCount(list, count) {
+  const heading = list.closest('.column').querySelector('h2');
+  let counter = heading.querySelector('.count');
+  if (!counter) {
+    counter = document.createElement('span');
+    counter.className = 'count';
+    heading.append(' ', counter);
+  }
+  counter.textContent = `(${count})`;
+}
+
+function makeButton(label, ariaLabel, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = label;
+  button.setAttribute('aria-label', ariaLabel);
+  button.addEventListener('click', onClick);
+  return button;
+}
 
 function createTaskCard(task) {
   const card = document.createElement('article');
@@ -14,6 +49,7 @@ function createTaskCard(task) {
 
   let dragPreview;
   card.addEventListener('dragstart', event => {
+    isDraggingTask = true;
     event.dataTransfer.setData('text/plain', String(task.id));
     event.dataTransfer.effectAllowed = 'move';
     card.classList.add('is-dragging');
@@ -39,35 +75,70 @@ function createTaskCard(task) {
   });
 
   card.addEventListener('dragend', () => {
+    isDraggingTask = false;
     card.classList.remove('is-dragging');
     dragPreview?.remove();
   });
 
   const title = document.createElement('h3');
+  title.className = 'task-title';
   title.textContent = task.title;
 
   const assignee = document.createElement('p');
-  assignee.textContent = `Assignee: ${task.assignee}`;
+  assignee.className = 'task-assignee';
+  assignee.textContent = `Assigned to: ${task.assignee}`;
 
   const priority = document.createElement('span');
   priority.className = `priority-${task.priority}`;
   priority.textContent = task.priority;
 
-  card.append(title, assignee, priority);
+  const actions = document.createElement('div');
+  actions.className = 'task-actions';
+  const columnIndex = taskColumns.findIndex(column => column.status === task.status);
+  if (columnIndex > 0) {
+    const previousColumn = taskColumns[columnIndex - 1];
+    actions.appendChild(makeButton(
+      '←',
+      `Move to ${previousColumn.label}`,
+      () => moveTask(task.id, previousColumn.status)
+    ));
+  }
+  if (columnIndex < taskColumns.length - 1) {
+    const nextColumn = taskColumns[columnIndex + 1];
+    actions.appendChild(makeButton(
+      '→',
+      `Move to ${nextColumn.label}`,
+      () => moveTask(task.id, nextColumn.status)
+    ));
+  }
+  actions.appendChild(makeButton('Delete', `Delete ${task.title}`, () => deleteTask(task.id)));
+
+  card.append(title, assignee, priority, actions);
   return card;
 }
 
 async function loadTasks() {
-  const response = await fetch('/api/tasks/grouped');
-  if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`);
+  let tasksByStatus;
+  const filter = filterInput?.value.trim();
+  if (filter) {
+    const tasks = await api(`/api/tasks?assignee=${encodeURIComponent(filter)}`);
+    tasksByStatus = Object.fromEntries(taskColumns.map(column => [column.status, []]));
+    for (const task of tasks) {
+      if (!tasksByStatus[task.status]) {
+        throw new Error(`Unexpected task status: ${task.status}`);
+      }
+      tasksByStatus[task.status].push(task);
+    }
+  } else {
+    tasksByStatus = await api('/api/tasks/grouped');
   }
 
-  const tasksByStatus = await response.json();
   document.getElementById('task-load-error')?.remove();
   for (const column of taskColumns) {
     const taskList = document.getElementById(column.elementId);
-    taskList.replaceChildren(...tasksByStatus[column.status].map(createTaskCard));
+    const tasks = tasksByStatus[column.status];
+    taskList.replaceChildren(...tasks.map(createTaskCard));
+    updateCount(taskList, tasks.length);
   }
 }
 
@@ -95,28 +166,43 @@ function showLoadError(error) {
   message.textContent = `Unable to load tasks: ${error.message}`;
 }
 
-function showMoveError(error) {
-  let message = document.getElementById('task-move-error');
+function showActionError(error, action) {
+  let message = document.getElementById('task-action-error');
   if (!message) {
     message = document.createElement('p');
-    message.id = 'task-move-error';
-    message.setAttribute('role', 'alert');
-    document.querySelector('[aria-label="Task Columns"]').insertAdjacentElement('beforebegin', message);
-  }
-
-  message.textContent = `Unable to move task: ${error.message}`;
-}
-
-function showClearError(error) {
-  let message = document.getElementById('task-clear-error');
-  if (!message) {
-    message = document.createElement('p');
-    message.id = 'task-clear-error';
+    message.id = 'task-action-error';
     message.setAttribute('role', 'alert');
     document.querySelector('[aria-label="Board Actions"]').insertAdjacentElement('afterend', message);
   }
 
-  message.textContent = `Unable to clear completed tasks: ${error.message}`;
+  message.textContent = `Unable to ${action}: ${error.message}`;
+}
+
+async function moveTask(id, status) {
+  try {
+    await api(`/api/tasks/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+    document.getElementById('task-action-error')?.remove();
+  } catch (error) {
+    showActionError(error, 'move task');
+    return;
+  }
+
+  loadTasks().catch(showLoadError);
+}
+
+async function deleteTask(id) {
+  try {
+    await api(`/api/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    document.getElementById('task-action-error')?.remove();
+  } catch (error) {
+    showActionError(error, 'delete task');
+    return;
+  }
+
+  loadTasks().catch(showLoadError);
 }
 
 const taskForm = document.getElementById('task-form');
@@ -127,20 +213,14 @@ taskForm.addEventListener('submit', async event => {
 
   try {
     const formData = new FormData(taskForm);
-    const response = await fetch('/api/tasks', {
+    await api('/api/tasks', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: formData.get('title'),
         assignee: formData.get('assignee'),
         priority: formData.get('priority'),
       }),
     });
-    const task = await response.json();
-    if (!response.ok) {
-      throw new Error(task.error || `Request failed with status ${response.status}`);
-    }
-
     taskForm.reset();
     document.getElementById('task-form-error')?.remove();
     loadTasks().catch(showLoadError);
@@ -153,19 +233,16 @@ taskForm.addEventListener('submit', async event => {
 
 const clearDoneButton = document.getElementById('clear-done-btn');
 clearDoneButton.addEventListener('click', async () => {
+  if (!window.confirm('Remove all finished tasks?')) return;
+
   clearDoneButton.disabled = true;
   let cleared = false;
   try {
-    const response = await fetch('/api/tasks/completed', { method: 'DELETE' });
-    if (!response.ok) {
-      throw new Error(`Request failed with status ${response.status}`);
-    }
-
-    await response.json();
-    document.getElementById('task-clear-error')?.remove();
+    await api('/api/tasks/completed', { method: 'DELETE' });
+    document.getElementById('task-action-error')?.remove();
     cleared = true;
   } catch (error) {
-    showClearError(error);
+    showActionError(error, 'clear completed tasks');
   } finally {
     clearDoneButton.disabled = false;
   }
@@ -175,7 +252,6 @@ clearDoneButton.addEventListener('click', async () => {
   }
 });
 
-const movingTaskIds = new Set();
 for (const column of document.querySelectorAll('.column')) {
   column.addEventListener('dragover', event => {
     event.preventDefault();
@@ -204,189 +280,31 @@ for (const column of document.querySelectorAll('.column')) {
 
     movingTaskIds.add(taskId);
     try {
-      const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
+      await api(`/api/tasks/${encodeURIComponent(taskId)}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, position: taskList.children.length }),
       });
-      const task = await response.json();
-      if (!response.ok) {
-        throw new Error(task.error || `Request failed with status ${response.status}`);
-      }
-
-      document.getElementById('task-move-error')?.remove();
+      document.getElementById('task-action-error')?.remove();
       try {
         await loadTasks();
       } catch (error) {
         showLoadError(error);
       }
     } catch (error) {
-      showMoveError(error);
+      showActionError(error, 'move task');
     } finally {
       movingTaskIds.delete(taskId);
     }
   });
 }
 
-loadTasks().catch(showLoadError);
-=======
-const STATUSES = ['todo', 'in-progress', 'done'];
-
-// Which list in index.html holds each status
-const LIST_IDS = {
-  'todo': 'todo-tasks',
-  'in-progress': 'doing-tasks',
-  'done': 'done-tasks',
-};
-
-// Optional filter box (null if the HTML doesn't have one yet)
-const filterInput = document.getElementById('filter-assignee');
-
-async function api(url, options = {}) {
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
-  if (res.status === 204) return null;
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Request failed');
-  return data;
-}
-
-function showError(err) {
-  alert(err.message);
-}
-
-async function loadTasks() {
-  try {
-    const filter = filterInput ? filterInput.value.trim() : '';
-    const url = filter
-      ? `/api/tasks?assignee=${encodeURIComponent(filter)}`
-      : '/api/tasks';
-    render(await api(url));
-  } catch (err) {
-    console.error(err);
-  }
-}
-
-function render(tasks) {
-  STATUSES.forEach((status) => {
-    const list = document.getElementById(LIST_IDS[status]);
-    const inColumn = tasks.filter((t) => t.status === status);
-
-    list.innerHTML = '';
-    inColumn.forEach((task) => list.appendChild(createCard(task)));
-    updateCount(list, inColumn.length);
-  });
-}
-
-function createCard(task) {
-  const card = document.createElement('div');
-  card.className = 'task-card';
-
-  const title = document.createElement('strong');
-  title.className = 'task-title';
-  title.textContent = task.title;
-
-  const badge = document.createElement('span');
-  badge.className = `priority-${task.priority}`;
-  badge.textContent = task.priority;
-
-  const assignee = document.createElement('p');
-  assignee.className = 'task-assignee';
-  assignee.textContent = `Assigned to: ${task.assignee}`;
-
-  const actions = document.createElement('div');
-  actions.className = 'task-actions';
-
-  const i = STATUSES.indexOf(task.status);
-  if (i > 0) {
-    actions.appendChild(makeButton('←', () => moveTask(task.id, STATUSES[i - 1])));
-  }
-  if (i < STATUSES.length - 1) {
-    actions.appendChild(makeButton('→', () => moveTask(task.id, STATUSES[i + 1])));
-  }
-  actions.appendChild(makeButton('Delete', () => deleteTask(task.id)));
-
-  card.append(title, ' ', badge, assignee, actions);
-  return card;
-}
-
-function makeButton(label, onClick) {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.textContent = label;
-  button.addEventListener('click', onClick);
-  return button;
-}
-
-function updateCount(list, count) {
-  const heading = list.closest('.column').querySelector('h2');
-  let counter = heading.querySelector('.count');
-  if (!counter) {
-    counter = document.createElement('span');
-    counter.className = 'count';
-    heading.append(' ', counter);
-  }
-  counter.textContent = `(${count})`;
-}
-
-async function moveTask(id, status) {
-  try {
-    await api(`/api/tasks/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ status }),
-    });
-    loadTasks();
-  } catch (err) {
-    showError(err);
-  }
-}
-
-async function deleteTask(id) {
-  try {
-    await api(`/api/tasks/${id}`, { method: 'DELETE' });
-    loadTasks();
-  } catch (err) {
-    showError(err);
-  }
-}
-
-async function clearDone() {
-  if (!confirm('Remove all finished tasks?')) return;
-  try {
-    await api('/api/tasks/completed', { method: 'DELETE' });
-    loadTasks();
-  } catch (err) {
-    showError(err);
-  }
-}
-
-const form = document.getElementById('task-form');
-
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-
-  const task = {
-    title: document.getElementById('task-title').value,
-    assignee: document.getElementById('task-assignee').value,
-    priority: document.getElementById('task-priority').value,
-  };
-
-  try {
-    await api('/api/tasks', { method: 'POST', body: JSON.stringify(task) });
-    form.reset();
-    loadTasks();
-  } catch (err) {
-    showError(err);
-  }
-});
-document.getElementById('clear-done-btn').addEventListener('click', clearDone);
-
 if (filterInput) {
-  filterInput.addEventListener('input', loadTasks);
+  filterInput.addEventListener('input', () => loadTasks().catch(showLoadError));
 }
 
-loadTasks();
-setInterval(loadTasks, 5000);
->>>>>>> b838debde1b178b490a0181b0494601313afe03d:public/app.js
+loadTasks().catch(showLoadError);
+setInterval(() => {
+  if (!isDraggingTask && movingTaskIds.size === 0) {
+    loadTasks().catch(showLoadError);
+  }
+}, 5000);
