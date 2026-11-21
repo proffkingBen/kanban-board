@@ -9,6 +9,10 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.get('/styles.css', (req, res) => {
+  res.sendFile(path.join(__dirname, 'styles.css'));
+});
+
 app.get('/api/tasks', async (req, res) => {
   const tasks = await taskModel.getAllTasks(req.query.assignee);
   res.json(tasks);
